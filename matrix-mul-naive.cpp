@@ -12,9 +12,13 @@ LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIA
 OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, 
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
+
 #include<CL/sycl.hpp>
 #include "dpc_common.hpp"
+#include<fstream>
+#include<iostream>
 
+using namespace std;
 using namespace sycl;
 
 class my_selector : public device_selector{
@@ -26,20 +30,31 @@ public:
     }
 };
 
+ofstream fout;
 
+queue construct_queue(string dev){
+        
+    if(dev == "gpu"){
+        gpu_selector selector;
+        queue q(selector);
+        fout.open("Outputs/out-gpu.txt", std::ios_base::app);
+        return q;
+    }
+    if(dev == "cpu"){
+        cpu_selector selector;
+        queue q(selector);
+        fout.open("Outputs/out-cpu.txt", std::ios_base::app);
+        return q;
+    }
+    else{
+        std::cout<<"Falling back to default selector\n";
+        default_selector selector;
+        queue q(selector);
+        return q;
+    }
+}
 
-constexpr int N = 1000;
-
-int main(){    
-    gpu_selector selector;
-    queue q(selector);
-    device my_device = q.get_device();
-    std::cout<<"Device Name: "<<my_device.get_info<info::device::name>()<<'\n';
-    
-    buffer<int, 2> A_b{range{N, N}};
-    buffer<int, 2> B_b{range{N, N}};
-    buffer<int, 2> C_b{range{N, N}};
-    
+void init_arrays(queue &q, size_t N, buffer<float, 2> &A_b, buffer<float, 2> &B_b, buffer<float, 2> &C_b){
     q.submit([&](handler &h){
         accessor A_acc(A_b, h, write_only);
         accessor B_acc(B_b, h, write_only);
@@ -48,14 +63,14 @@ int main(){
         h.parallel_for(range{N, N}, [=](id<2> idx){
             int i = idx[0];
             int j = idx[1];
-            A_acc[i][j] = 1;
-            B_acc[i][j] = 2;
+            A_acc[i][j] = i+1;
+            B_acc[i][j] = j+1;
             C_acc[i][j] = 0;
         });
-    }).wait();
-    
-    double elapsed_p = 0;
-    dpc_common::TimeInterval timer_p;
+    });
+}
+
+void multiply(queue &q, size_t N, buffer<float, 2> &A_b, buffer<float, 2> &B_b, buffer<float, 2> &C_b){
     auto evt = q.submit([&](handler &h){
         accessor A_acc(A_b, h, read_only);
         accessor B_acc(B_b, h, read_only);
@@ -71,14 +86,39 @@ int main(){
     });
     
     evt.wait();
-    elapsed_p += timer_p.Elapsed();
-    std::cout << "Time parallel: " << elapsed_p << " sec\n";
-    host_accessor C_host_acc(C_b, read_only);
-    for(int i=0; i<10; i++){
-        std::cout<<C_host_acc[0][i]<<' ';
-    }
-    std::cout<<'\n';
+}
 
+int main(int argc, char* argv[]){
+    size_t N = atoi(argv[1]);
+    std::string dev = argv[2];    
+    
+    queue q = construct_queue(dev);
+
+    device my_device = q.get_device();
+    std::cout<<"Device Name: "<<my_device.get_info<info::device::name>()<<'\n';
+    
+    buffer<float, 2> A_b{range{N, N}};
+    buffer<float, 2> B_b{range{N, N}};
+    buffer<float, 2> C_b{range{N, N}};
+    
+    double elapsed_p = 0;
+    dpc_common::TimeInterval timer_p;
+    
+    init_arrays(q, N, A_b, B_b, C_b);
+    multiply(q, N, A_b, B_b, C_b);
+    host_accessor C_host_acc(C_b, read_only);
+    
+    elapsed_p += timer_p.Elapsed();
+    std::cout << "Time elapsed for N = "<<N<<" : " << elapsed_p << " sec\n";
+    
+    fout<<elapsed_p<<", ";
+    fout.close();
+    
+    for(int i=0; i<10; i++){
+        cout<<C_host_acc[0][i]<<" ";
+    }
+    cout<<"\n\n\n";
+    
     return 0;
 }
 
