@@ -112,6 +112,13 @@ void __attribute__((noinline)) MatrixMulOpenMpGpuOffloading() {
 #pragma omp target teams distribute parallel for map(to : a, b) \
   map(tofrom : c) thread_limit(128)
   {
+    .
+    .
+    .
+   }
+  
+  
+      
     for (i = 0; i < M; i++) {
       for (k = 0; k < N; k++) {
         // Each element of the product is just the sum 1+2+...+n
